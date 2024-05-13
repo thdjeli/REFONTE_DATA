@@ -1,0 +1,1 @@
+helm install spark oci://registry-1.docker.io/bitnamicharts/spark -n airflow -f values_spark.yaml --debug

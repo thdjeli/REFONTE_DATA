@@ -1,0 +1,9 @@
+helm repo add trino https://trinodb.github.io/charts
+helm repo update
+helm show values trino/trino> values_trino.yaml
+vi values_trino.yaml
+images: everest2024/everest_trino:1.0.0
+helm install trino trino/trino -n traitement -f values_trino.yaml --debug --timeout 10m00s
+
+#pour desinstaller
+helm uninstall trino -n traitement
