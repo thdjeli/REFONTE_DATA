@@ -1,0 +1,23 @@
+#ajout repo elasticsearch
+helm repo add elastic https://helm.elastic.co
+#mise à jour
+helm repo update
+helm show values elastic/elasticsearch > elastic.yaml
+#fichier yaml
+clusterName: "elasticsearch"
+nodeGroup: "master"
+master:
+  replicas: 3
+  heapSize: "512m"
+data:
+  replicas: 2
+  heapSize: "512m"
+  persistence:
+    enabled: true
+#deploy elasticsearch
+
+helm install elasticsearch elastic/elasticsearch -f elastic.yaml -n data --debug --timeout 10m00s
+
+#verifier le deployement
+bash
+kubectl get pods --namespace=data -l app=elasticsearch-master -w

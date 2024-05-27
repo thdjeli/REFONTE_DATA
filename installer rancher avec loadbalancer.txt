@@ -1,25 +1,38 @@
+#création des workers dans la VM 
+RAM: 8192 MB, CPU:3, stockage 300 Gi, réseau: 192.168.68.0/24, mdp: Everest123@
+#sur chaque VM:
+sudo su
+sudo apt update && sudo apt upgrade
+sudo pro --version
+sudo apt install net-tools
+sudo apt install curl
+sudo apt install openssh-server
+
+#Attribution d'adresse statique
+master01 : 192.168.68.206
+master02 : 192.168.68.213
+master03: 192.168.68.209
+lb: 192.168.68.212
+node01: 192.168.68.207
+node02: 192.168.68.210
+node03: 192.168.68.211
+
+#connection à ssh
+ssh name_node@ip 
+sudo su 
+
 #installer docker
 curl -sSL https://get.docker.com/ | sh
 sudo usermod -aG docker $(whoami) 
 sudo service docker start && sudo service docker status
-#sur le loadbalancer
-sudo apt update && sudo apt-get install postgresql-contrib
-psql --version
-cd  /etc/postgresql/14/main/
-sudo nano pg_hba.conf
-host   all   all 0.0.0.0/0   md5
-sudo nano postgresql.conf
-sudo /etc/init.d/postgresql restart
-sudo -u postgres psql
-ALTER USER postgres WITH PASSWORD 'password123';
-CREATE DATABASE kubernetes;
+
+#                                 sur le loadbalancer
 #install nginx
 sudo apt update && sudo apt upgrade
 apt-get install nginx -y
 systemctl start nginx
 systemctl enable nginx
 systemctl status nginx
-
 #Configurer un équilibreur de charge Nginx
 mv /etc/nginx/sites-enabled/default /etc/nginx/sites-enabled/default.old
 mv /etc/nginx/nginx.conf /etc/nginx/nginx.conf.old
@@ -31,9 +44,9 @@ events {}
 
 stream {
   upstream k3s_servers {
-    server 192.168.1.105:6443; # Change to the IP of the K3s first master VM
-    server 192.168.1.129:6443; # Change to the IP of the K3s second master VM
-    server 192.168.1.156:6443; # Change to the IP of the K3s third master VM
+    server 192.168.68.206:6443; # Change to the IP of the K3s first master VM
+    server 192.168.68.213:6443; # Change to the IP of the K3s second master VM
+    server 192.168.68.209:6443; # Change to the IP of the K3s third master VM
   }
 
   server {
@@ -54,49 +67,62 @@ LISTEN 0      128         127.0.0.1:631         0.0.0.0:*     users:(("cupsd",pi
 LISTEN 0      128           0.0.0.0:22          0.0.0.0:*     users:(("sshd",pid=25318,fd=3))
 LISTEN 0      128              [::]:22             [::]:*     users:(("sshd",pid=25318,fd=4))
 LISTEN 0      128             [::1]:631            [::]:*     users:(("cupsd",pid=17846,fd=6))
-#Installer K3s sur les serveurs
-curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.27.12+k3s1 K3S_TOKEN=SECRET sh -s - server --cluster-init --tls-san=192.168.1.173
-root@master01:/home/master01# kubectl get nodes
-NAME       STATUS   ROLES                       AGE   VERSION
-master01   Ready    control-plane,etcd,master   88s   v1.27.12+k3s1
-#token du cluster
-sudo cat /var/lib/rancher/k3s/server/node-token
-#ajouter des autres master
-curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.27.12+k3s1 K3S_TOKEN=K10bb6cf09fa7ff658809bcbc3ecbc2ba90e6a101a3b1b8e73986f51b28e55e4e02::server:SECRET sh -s - server --server https://192.168.1.105:6443 --tls-san=192.168.1.173
-sudo k3s kubectl get node
-#obtenir le jeton pour ajouter les noeuds
-sudo cat /var/lib/rancher/k3s/server/node-token
-#ajouter les noeuds
-sudo curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.27.12+k3s1 K3S_URL=https://192.168.1.173:6443 K3S_TOKEN=K10bb6cf09fa7ff658809bcbc3ecbc2ba90e6a101a3b1b8e73986f51b28e55e4e02::server:SECRET sh -
-#Configuration de l’accès au cluster depuis ma machine locale
-curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-kubectl version --client
-nano ~/.kube/config
+#dns
+sudo echo "192.168.68.206 master01" >> /etc/hosts
+sudo echo "192.168.68.213 master02" >> /etc/hosts
+sudo echo "192.168.68.209 master03" >> /etc/hosts
+sudo echo "192.168.68.207 node01" >> /etc/hosts
+sudo echo "192.168.68.210 node02" >> /etc/hosts
+sudo echo "192.168.68.211 node03" >> /etc/hosts
+sudo echo "192.168.68.212 k3s.lab.everest.com" >> /etc/hosts
+
+#                        INSTALLER K3S
+#sur le master01
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.27.12+k3s1 K3S_TOKEN=SECRET sh -s - server --tls-san k3s.lab.everest.com --write-kubeconfig-mode 644 --disable servicelb --disable traefik --cluster-init
+
+# voir le cluster K3S
 kubectl get nodes
-alias k=kubectl
-k get nodes
-#installer 
-sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
+#rattacher le master01 et master02
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.27.12+k3s1 K3S_TOKEN=SECRET sh -s - server --server https://k3s.lab.everest.com:6443 --write-kubeconfig-mode 644 --disable servicelb --disable traefik
+
+# voir le cluster K3S
+kubectl get nodes
+#rattacher les nœuds workers
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.27.12+k3s1 K3S_URL=https://k3s.lab.everest.com:6443 K3S_TOKEN=SECRET sh -
+# voir le cluster K3S
+kubectl get nodes
+#attribuer les roles workers
+kubectl label node node01 node-role.kubernetes.io/worker=worker
+
+#accès au cluster depuis le burreau distant
+sudo cp /etc/rancher/k3s/k3s.yaml /home/master01/
+sudo chown master01:master01 /home/master01/k3s.yaml
+ll
+
+# transferer  à partir de winscp
+sudo cp /home/ossan/ k3s.yaml ~/.kube/config
+sudo echo "192.168.68.212 k3s.lab.everest.com" >> /etc/hosts
+# installer helm chart
+curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
 chmod 700 get_helm.sh
 ./get_helm.sh
-#ajouter le repo rancher
+helm version
+#ajouter les repos helm 
+helm repo add jetstack https://charts.jetstack.io
+helm repo add rancher-latest https://releases.rancher.com/server-charts/latest
 helm repo add rancher-stable https://releases.rancher.com/server-charts/stable
 helm repo update
 helm repo list
-#creer un espace de nom pour rancher
+
+#creation de namespaces
 kubectl get namespace
 kubectl create namespace cattle-system
 kubectl get namespace
+
 #certificat
 kubectl apply --validate=false -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.5/cert-manager.crds.yaml
 kubectl create namespace cert-manager
 kubectl get namespace
-helm repo add jetstack https://charts.jetstack.io
-helm repo update
-helm repo list
-helm install cert-manager jetstack/cert-manager --namespace cert-manager --version v1.14.5 --set installCRDs=true
 mv /root/.kube/config /root/.kube/config.bak
 touch /root/.kube/config
 chmod 600 /root/.kube/config
@@ -104,30 +130,46 @@ sudo cp /etc/rancher/k3s/k3s.yaml /root/.kube/config
 sudo chmod 600 /root/.kube/config
 ls -l /root/.kube/config
 helm install cert-manager jetstack/cert-manager --namespace cert-manager --version v1.14.5
-# kubectl delete crd certificaterequests.cert-manager.io certificates.cert-manager.io challenges.acme.cert-manager.io clusterissuers.cert-manager.io issuers.cert-manager.io orders.acme.cert-manager.io
-# kubectl get crd
-#install rancher
-helm repo add rancher-latest https://releases.rancher.com/server-charts/latest
-#dns
-sudo echo "192.168.1.105 master1" >> /etc/hosts
-sudo echo "192.168.1.129 master2" >> /etc/hosts
-sudo echo "192.168.1.156 master3" >> /etc/hosts
-sudo echo "192.168.1.176 node1" >> /etc/hosts
-sudo echo "192.168.1.174 node2" >> /etc/hosts
-sudo echo "192.168.1.177 node3" >> /etc/hosts
-sudo echo "192.168.1.173 rancher.local.everest.com" >> /etc/hosts
-#installer rancher
-sudo docker pull rancher/rancher:v2.8.3 && sudo docker pull rancher/rancher-webhook:v0.4.3
-helm install rancher rancher-latest/rancher --namespace cattle-system --set hostname=rancher.local.everest.com --set replicas=1 --set bootstrapPassword=Everest123456789
+
+#installation de metalb
+kubectl create namespace metallb-system
+helm repo add metallb https://metallb.github.io/metallb
+helm repo update
+helm install metallb metallb/metallb --namespace metallb-system
+
+#config metalab
+sudo nano metallb-cr.yaml
+#configuration
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: first-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 192.168.68.160-192.168.68.169 # << change this range.
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: example
+  namespace: metallb-system
+
+#installer rancher avec 3 replicats
+sudo echo "192.168.68.160 rancher.lab.everest.com" >> /etc/hosts
+helm install rancher rancher-stable/rancher --namespace cattle-system --set hostname=rancher.lab.everest.com --set replicas=3 --set bootstrapPassword=Everest123456789#
 kubectl -n cattle-system rollout status deploy/rancher
+kubectl expose deployment rancher -n cattle-system --type=LoadBalancer --name=rancher-lb --port=443
+kubectl get secret --namespace cattle-system bootstrap-secret -o go-template='{{.data.bootstrapPassword|base64decode}}{{"\n"}}'
 
-#deployement sur le namespaces traitement
-sudo docker pull everest2024/everest_spark:1.0.0 && sudo docker pull everest2024/everest_trino:1.0.0
-sudo docker pull everest2024/everest_citus:1.0.0 && sudo docker pull everest2024/everest_bd:1.0.0
-#deployement sur le namespace data
-sudo docker pull everest2024/everest_rook_ceph:1.0.0 && sudo docker pull everest2024/everest_elasticsearch:1.0.0
-
-#installation de iscis
+#traefix
+helm repo add traefik https://helm.traefik.io/traefik
+helm repo update
+helm install traefik traefik/traefik --namespace=kube-system
+kubectl -n kube-system logs $(kubectl -n kube-system get pods --selector "app.kubernetes.io/name=traefik" --output=name)
+kubectl create namespace traitement
+kubectl get namespaces
+#longhorn
 sudo apt-get update && sudo apt-get install -y open-iscsi
 sudo systemctl start iscsid
 sudo systemctl status iscsid
@@ -135,24 +177,20 @@ helm repo add longhorn https://charts.longhorn.io    #ajout du repo
 helm repo update # mise à jour du repo
 helm install longhorn longhorn/longhorn --namespace longhorn-system --create-namespace --debug --timeout 10m00s # installation de longhorn
 kubectl get pods -n longhorn-system #verification de l’installation
-#installation airflow
-helm repo add apache-airflow https://airflow.apache.org/
-helm repo update
-helm repo list
-helm show values apache-airflow/airflow> values.yaml 
-vi values.yaml
-helm install  airflow  apache-airflow/airflow -n traitement -f values.yaml --debug --timeout 10m00s
-#installations trino
+
+#deploiement
+#trino
 helm repo add trino https://trinodb.github.io/charts
-helm show values trino/trino> values.yaml 
-vi values.yaml
-helm install trino trino/trino -n traitement -f values.yaml --debug --timeout 10m00s
-#installation spark
-helm install spark oci://registry-1.docker.io/bitnamicharts/spark -n airflow --debug
-#installation citus via yaml file
-#installation elasticsearch
-helm repo add elastic https://helm.elastic.co
-helm repo update
-helm show values elastic/elasticsearch > values.yaml
-vi values.yaml
-helm install elasticsearch elastic/elasticsearch -f values.yaml -n data --debug --timeout 10m00s
+helm show values trino/trino> trino.yaml
+vi trino.yaml
+helm install trino trino/trino -n traitement -f trino.yaml --debug --timeout 10m00s
+#spark
+helm install spark oci://registry-1.docker.io/bitnamicharts/spark -n traitement -f spark.yaml --debug --timeout 10m00s
+#citus
+kubectl apply -f citus.yaml -n data
+
+#elasticsearch
+voir elasticsearch.txt
+
+
+
